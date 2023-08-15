@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>msousa</title>
+    <link rel="stylesheet" type="text/css" href="../style.css">
+  </head>
+  <body>
+    <header>
+      <nav>
+	<ul>
+	  <li><a href="../index.html">Home</a></li>
+	  <li><a href="../archive.html">Archive</a></li>
+	  <li><a href="../about.html">About</a></li>
+	</ul>
+      </nav>
+    </header>
+    <main>
+      <section>
+	<h2>A note-taking application</h2>
+	<time datetime="2023-08-15">Tue, 15 Aug 2023</time>
+	<p> Most of the time, I have a terminal or emacs around, and
+	  it is very convenient to have a quick and straightforward
+	  note-taking application. Something that we can simply write
+
+	  <div class="source-code">
+	    <pre>$ <kbd>notes</kbd></pre>
+	  </div>
+
+	  in to the terminal and it will open a text editor where you
+	  insert your notes, save it and that's it. Or, if you are in
+	  a hurry:
+
+	  <div class="source-code">
+	    <pre><code>$ <kbd>notes write [...]</kbd></code></pre>
+	  </div>
+
+	  To view your notes, you simply 
+
+	  <div class="source-code">
+	    <pre><code>$ <kbd>notes show</kbd>
+Mon Aug 14 17:45:44 2023	went to jog
+Mon Aug 14 17:51:38 2023	made tea</code></pre>
+	  </div>
+
+	  <p> The implementation of such program is straightforward,
+	  but since I did it in C I will walk you through it each
+	  step. First of all, we want to handle command line arguments
+
+	  <div class="source-code">
+	    <pre><code>#include &ltstring.h&gt
+
+int main(int argc, char **argv)
+{
+  if (argc > 1) {
+    for (int i = 1; i < argc; i++) {
+
+      // Actions
+      if (!(strcmp(argv[i], "show")))
+	return show_notes();
+
+      else if (!(strcmp(argv[i], "write")))
+	return write_notes(i, argc, argv);
+
+      else if (!(strcmp(argv[i], "help")))
+	return help();
+
+    }
+  }
+  
+  // Default action
+  return make_new_entry_using_external_editor();    
+}
+</code></pre></div>
+
+	  Here we check if there are arguments; and if so, handle
+	  them. If there are no arguments just make a new entry using
+	  an external editor. Using the C standard library, the
+	  implementation of <code>show_notes()</code> is
+	  straightforward
+	  
+	  <div class="source-code">
+	    <pre><code>#include &ltstdio.h&gt
+
+char *filename = "...";
+
+int show_notes(void)
+{
+  FILE *fp = 0;
+  if ((fp = fopen(filename, "r"))) {
+    char c;    
+    while ((c = fgetc(fp)) != EOF) {
+      putchar(c);
+    }
+  } else {
+    perror("can't open filename");
+    return 1;
+  }
+  if (fp) fclose(fp);
+  return 0;
+}
+</code></pre></div>  
+
+	  We open the file and print all the characters to standard
+	  output, we also check if there are any errors. To write from
+	  the commandline we need to do more work. First, we need to
+	  write a timestamp for that entry. We do this by leveraging
+	  the <code>time.h</code> from the standard library and
+	  the <code>ctime</code> function. This function returns a
+	  static allocated string of the timestamp. After that, we
+	  just write everything to the file. The implementation looks
+	  like
+
+	    <div class="source-code"><pre><code>#include &ltstdio.h&gt
+#include &lttime.h&gt
+
+char *filename = "...";
+
+int write_notes(int beg, int argc, char **argv)
+{
+  FILE *fp = 0;
+  if ((fp = fopen(filename, "a"))) {
+
+    // Get the timestamp
+    time_t tm = time(0);
+    char *p = ctime(&tm);
+
+    // Write the timestamp		  
+    while (*p) {
+      fputc(*p != '\n' ? *p : '\t', fp);
+      p++;
+    }
+
+    // Write the remaining commandline arguments
+    for (int i = beg + 1; i < argc; i++) {
+      fprintf(fp, "%s%c", argv[i], 1 + i - argc ? ' ' : '\n');
+    }
+
+  } else {
+    perror("can't open filename");
+    return 1;
+  }
+  if (fp) fclose(fp);
+  return 0;
+}
+</code></pre></div>
+
+	    <p> When passing no arguments to the program, I wanted it
+	    to behave like <code>git commit</code>: open the default
+	    text editor (vi) to edit the message being written. To
+	    achieve this, we need to be able to fork the process and
+	    execute some code. In Linux, we use the
+	    <code>unistd.h</code> from the standard library. We do
+	    this in following way: first, we open text file in a
+	    temporary location. After we finish editing the file, we
+	    copy the contents from temporary file to our notes
+	    file. The implementation looks roughly like this:
+
+<div class="source-code"><pre><code>#include &ltunistd.h&gt
+
+int make_new_entry_using_external_editor(void)
+{
+  char *tmpfile = "...";
+
+  int pid = fork();
+
+  if (pid  == -1) {
+    perror("can't fork");
+    return 1;
+  } else if (pid == 0) {
+    char *args[] = { "vi", tmpfile, NULL };
+    execv("/usr/bin/vi", args);
+  } else {
+    /* copy the temporary file to our own... */   
+  }
+  return 0;
+}
+</code></pre></div>
+
+	    <p> And that&apos;s it! Take look at the final
+	    version <a href="../media/src/notes.c">here</a> with all
+	    the implementation details, and compile it yourself. The
+	    source code is available openly to the public domain. Feel
+	    free to modify it to suit your own needs.
+
+	  <div class="source-code">
+	    <pre><code>$ <kbd>gcc -Wall -Wextra -g -o notes notes.c</kbd>
+$ <kbd>./notes help</kbd>
+usage: notes [options] [command]
+
+commands:
+ show - Display the notes file contents
+ write [text] - Add text to the notes file
+ help - Display this help message
+
+options:
+ -f filename - Specify notes file location (default is $HOME/notes.txt)
+
+If no command is specified, notes will open an editor to create a new note.</code></pre>
+	  </div>
+
+	  <p> This is a simple application that I use regularly and
+	  demonstrates how you can hack something up quickly using C
+	  and its standard library. Happy hacking!
+      </section>
+    </main>
+    <footer>
+      <p>&copy; 2023 Matheus Sousa</p>
+    </footer>
+  </body>
+</html>
